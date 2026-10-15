@@ -199,3 +199,11 @@
 .docs-no-results { display:grid; gap:16px; justify-items:center; text-align:center; padding:60px 20px; color:#8190a6; }
 @media(max-width:1050px) { .docs-layout { grid-template-columns:220px minmax(0,1fr); gap:16px; } .docs-article { padding:24px; } }
 @media(max-width:760px) { .docs-layout { grid-template-columns:1fr; } .docs-index { position:static; } .docs-index nav { flex-direction:row; flex-wrap:wrap; } .docs-index nav button { flex:1 0 42%; } .docs-article { padding:20px; } }
+.business-pagination { border-top:1px solid #e8edf5; padding:16px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; font-size:12px; color:#7788a1; }
+.business-pagination-controls,.business-pagination-controls form,.business-pagination-controls label,.business-pagination-buttons { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.business-pagination-controls { gap:14px; }
+.business-pagination select,.business-pagination input { border:1px solid #dfe7f3; border-radius:6px; background:#fff; color:#526986; padding:6px 8px; height:32px; }
+.business-pagination input { width:76px; }
+.business-pagination .btn { min-height:32px; padding:5px 9px; font-size:12px; }
+.business-pagination-buttons>span { min-width:48px; text-align:center; }
+@media(max-width:760px) { .business-pagination-controls { width:100%; } .business-pagination-buttons { width:100%; justify-content:space-between; } }
