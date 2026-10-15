@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url),esbuild=require(require.resolve('esbuild',{paths:[path.dirname(require.resolve('vite'))]}));
+const bundle=await esbuild.build({entryPoints:['lib/industry.ts'],bundle:true,platform:'node',format:'esm',write:false});
+const {classifyIndustry,withIndustryClassification}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const software=classifyIndustry('软件开发');assert.equal(software.level1,'信息传输、软件和信息技术服务业');assert.equal(software.level2,'软件和信息技术服务业');assert.equal(software.level3,'软件开发');
+const internet=classifyIndustry('互联网和相关服务');assert.equal(internet.level2,'互联网和相关服务');assert.equal(internet.level3,'待细分');assert.equal(internet.status,'partial');
+assert.equal(classifyIndustry('制造业').level2,'待细分');assert.equal(classifyIndustry('无法识别的业务行业').level1,'待分类');assert.equal(classifyIndustry('待核实').status,'empty');
+assert.equal(classifyIndustry('651').level3,'软件开发');assert.equal(classifyIndustry('651 软件开发').level3,'软件开发');assert.equal(classifyIndustry('651 错误标签').status,'unmatched');
+const a=withIndustryClassification({name:'不影响行业的公司名',industry:'制造业',business:{'所属行业':'软件开发'}});assert.equal(a.industryClassification.level3,'软件开发');assert.equal(a.industry,'制造业');
+console.log('PASS three-level standard classification, partial/unknown source, code recognition and original industry preservation');
+
+const scopeAccount=(scope)=>withIndustryClassification({name:'测试公司',industry:'互联网和相关服务',scope,business:{'所属行业':'互联网和相关服务','经营范围':scope}}).industryClassification;
+assert.equal(scopeAccount('经营互联网接入服务；提供宽带接入服务').level3,'互联网接入及相关服务');
+assert.equal(scopeAccount('电子商务平台运营；在线交易服务').level3,'互联网平台');
+assert.equal(scopeAccount('云计算、大数据服务、互联网数据存储').level3,'互联网数据服务');
+assert.equal(scopeAccount('网络安全防护及安全评估服务').level3,'互联网安全服务');
+assert.equal(scopeAccount('互联网信息服务').level3,'互联网信息服务');
+assert.equal(scopeAccount('技术服务、技术转让').level3,'其他互联网服务');assert.equal(scopeAccount('技术服务、技术转让').status,'provisional');
+assert.equal(scopeAccount('互联网信息服务；网络安全服务').level3,'互联网安全服务');
+assert.equal(scopeAccount('不从事互联网接入服务').status,'provisional');
+const exact=withIndustryClassification({industry:'互联网信息服务',scope:'电子商务平台运营'}).industryClassification;assert.equal(exact.level3,'互联网信息服务');assert.equal(exact.method,'standard');
+const softwareScope=withIndustryClassification({industry:'软件和信息技术服务业',scope:'软件开发；应用软件研发'}).industryClassification;assert.equal(softwareScope.level3,'软件开发');assert.equal(softwareScope.method,'scope');assert.ok(softwareScope.basis.includes('软件开发'));
+assert.equal(withIndustryClassification({industry:'汽车制造 > 整车制造'}).industryClassification.level3,'汽车整车制造');
+console.log('PASS scope-based subcategories, conservative fallback, evidence, non-crossing parents and exact classifications preserved');

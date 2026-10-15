@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import readExcel from 'read-excel-file/node';
+const require=createRequire(import.meta.url);
+const esbuild=require(require.resolve('esbuild',{paths:[path.dirname(require.resolve('vite'))]}));
+const bundle=await esbuild.build({entryPoints:['lib/business-import.ts'],bundle:true,platform:'node',format:'esm',write:false});
+const {parseBusinessSheet,planBusinessImport,businessFields,batchBusinessRows}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+const template=await readExcel('public/business-import-template.xlsx');
+assert.deepEqual(template[0].data[0],businessFields);
+assert.throws(()=>parseBusinessSheet(template[0].data),/没有企业数据/);
+assert.throws(()=>parseBusinessSheet([['公司','法人'],['A','B']]),/企业名称/);
+assert.throws(()=>parseBusinessSheet([['企业名称','企业名称']]),/重复/);
+const large=parseBusinessSheet([['企业名称','电话'],...Array.from({length:1001},(_,i)=>['企业'+i,'010-12345678'])]);
+assert.equal(large.rows.length,1001);
+const largeAccounts=large.rows.map((r,i)=>({id:'large-'+i,name:r.fields['企业名称']}));
+const largePlan=planBusinessImport(large.rows,largeAccounts,'fill');assert.equal(largePlan.filter(r=>r.account).length,1001);
+const batches=batchBusinessRows(largePlan.map(r=>({row:r.row,fields:r.fields,accountId:r.account.id})));assert.equal(batches.length,67);assert.equal(batches.flat().length,1001);assert.ok(batches.every(b=>b.length<=15));
+const longRows=Array.from({length:30},(_,i)=>({row:i+2,accountId:'long-'+i,fields:{'企业名称':'长文本企业'+i,'经营范围':'测'.repeat(15000)}}));
+const byteBatches=batchBusinessRows(longRows);assert.ok(byteBatches.length>1);assert.ok(byteBatches.every(b=>new TextEncoder().encode(JSON.stringify(b)).length<710000));
+const duplicate=planBusinessImport([...large.rows,{...large.rows[0],row:2000}],largeAccounts,'fill');assert.equal(duplicate.filter(r=>!r.account).length,2);
+console.log('PASS 1001-row parse and indexed matching, global duplicates, automatic row/byte batching');
+const parsed=parseBusinessSheet([['说明'],['企业名称','成立日期','电话','统一社会信用代码','未知列'],['测试股份有限公司',new Date('2024-01-02T00:00:00Z'),'010-01234567','91110000100026793Y','忽略'],[]]);
+assert.equal(parsed.rows.length,1);assert.equal(parsed.rows[0].row,3);assert.equal(parsed.rows[0].fields['成立日期'],'2024-01-02');assert.deepEqual(parsed.ignored,['未知列']);
+const account={id:'test',name:'测试股份有限公司'};
+assert.equal(planBusinessImport(parsed.rows,[account],'fill')[0].account.id,'test');
+assert.equal(planBusinessImport([{row:2,fields:{'企业名称':'测试'}}],[account],'fill')[0].account,undefined);
+assert.ok(planBusinessImport([parsed.rows[0],{...parsed.rows[0],row:4}],[account],'fill').every(r=>!r.account));
+if(process.argv[2]){
+ const workbook=await readExcel(process.argv[2],{parseNumber:v=>v});const imported=parseBusinessSheet(workbook[0].data);
+ assert.equal(imported.recognized,27);assert.equal(imported.rows.length,1);assert.equal(imported.rows[0].fields['企业名称'],'同方股份有限公司');assert.equal(imported.rows[0].fields['成立日期'],'1997-06-25');assert.equal(imported.rows[0].fields['统一社会信用代码'],'91110000100026793Y');assert.ok(imported.rows[0].fields['经营范围'].length>500);
+ console.log('PASS provided workbook: 27 fields, text identifiers, date and long scope');
+}
+const newPlan=planBusinessImport(large.rows,[],'fill');assert.equal(newPlan.filter(r=>r.create).length,1001);assert.ok(newPlan.every(r=>r.changes.length===2));
+const newDuplicate=planBusinessImport([{row:2,fields:{'企业名称':'新公司甲','统一社会信用代码':'91110000100026793Y'}},{row:3,fields:{'企业名称':'新公司乙','统一社会信用代码':'91110000100026793Y'}}],[],'fill');assert.ok(newDuplicate.every(r=>!r.create&&!r.account));
+console.log('PASS template, empty/invalid files, field mapping, dates, limits and duplicate matching');
+
+const legacy=planBusinessImport([{row:2,fields:{'企业名称':'旧号公司甲','统一社会信用代码':'110108123456789'}},{row:3,fields:{'企业名称':'旧号公司乙','统一社会信用代码':'110108123456789'}}],[],'fill');assert.ok(legacy.every(r=>r.create));assert.ok(legacy.every(r=>r.reason.includes('待核实')));
+const existingCode={id:'valid-code',name:'已有合法代码公司',business:{'统一社会信用代码':'91110000100026793Y'}};
+const preserved=planBusinessImport([{row:2,fields:{'企业名称':existingCode.name,'统一社会信用代码':'旧代码','电话':'010-123'}}],[existingCode],'overwrite')[0];assert.equal(preserved.account.id,existingCode.id);assert.ok(!preserved.changes.some(c=>c.field==='统一社会信用代码'));
+console.log('PASS legacy codes import by exact name, invalid codes never merge companies or replace valid identifiers');
